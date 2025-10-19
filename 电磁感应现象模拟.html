@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>电磁感应现象可视化模拟</title>
+    <script src="https://cdn.jsdelivr.net/npm/p5@1/lib/p5.min.js"></script>
+    <style>
+        body { font-family: 'Arial', sans-serif; max-width: 1200px; margin: 20px auto; padding: 0 20px; }
+        .control-panel { display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px; padding: 15px; border: 1px solid #eee; border-radius: 8px; }
+        .control-group { min-width: 200px; }
+        label { display: block; margin-bottom: 5px; font-weight: 500; }
+        input[type="range"], select { width: 100%; }
+        .btn-group { margin-top: 25px; }
+        button { padding: 8px 16px; margin-right: 10px; cursor: pointer; border: none; border-radius: 4px; background: #4285f4; color: white; }
+        button:hover { background: #3367d6; }
+        #canvas-container { border: 1px solid #eee; border-radius: 8px; overflow: hidden; margin-bottom: 20px; }
+        .data-panel { padding: 15px; border: 1px solid #eee; border-radius: 8px; }
+        .current-indicator { width: 100px; height: 30px; border: 1px solid #333; text-align: center; line-height: 30px; margin-top: 10px; }
+        .current-direction { font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>电磁感应现象可视化模拟</h1>
+
+    <!-- 控制面板 -->
+    <div class="control-panel">
+        <div class="control-group">
+            <label for="magneticField">磁场强度: <span id="fieldValue">2.5</span> T</label>
+            <input type="range" id="magneticField" min="0" max="5" step="0.1" value="2.5">
+        </div>
+        <div class="control-group">
+            <label for="fieldDirection">磁场方向:</label>
+            <select id="fieldDirection">
+                <option value="left">水平向左</option>
+                <option value="right">水平向右</option>
+                <option value="up">竖直向上</option>
+                <option value="down">竖直向下</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label for="conductorSpeed">导体运动速度: <span id="speedValue">10</span> m/s</label>
+            <input type="range" id="conductorSpeed" min="0" max="20" value="10">
+        </div>
+        <div class="control-group">
+            <label for="motionDirection">导体运动方向:</label>
+            <select id="motionDirection">
+                <option value="horizontal">水平</option>
+                <option value="vertical">竖直</option>
+                <option value="diagonal">斜向（45°）</option>
+            </select>
+        </div>
+        <div class="btn-group">
+            <button id="startBtn">开始运动</button>
+            <button id="pauseBtn">暂停</button>
+            <button id="resetBtn">重置</button>
+        </div>
+    </div>
+
+    <!-- 动画画布 -->
+    <div id="canvas-container"></div>
+
+    <!-- 实时数据面板 -->
+    <div class="data-panel">
+        <h3>实时电磁数据</h3>
+        <p>感应电动势: <span id="emfData">0.00</span> V</p>
+        <p>感应电流: <span id="currentData">0.00</span> A</p>
+        <div class="current-indicator">
+            电流方向: <span class="current-direction" id="directionData">无</span>
+        </div>
+    </div>
+
+    <script>
+        // 全局参数
+        let B = 2.5, v = 10;
+        let fieldDirection = 'right', motionDirection = 'horizontal';
+        let isRunning = false, isPaused = false;
+        let t = 0, dt = 0.05;
+        let conductorX = 100, conductorY = 200; // 导体初始位置
+        const conductorLength = 50; // 导体长度
+        const resistance = 5; // 电路电阻
+
+        // p5.js 动画核心
+        let sketch = function(p) {
+            let canvas;
+            const scale = 20; // 像素/米，控制画布比例
+
+            p.setup = function() {
+                canvas = p.createCanvas(800, 400);
+                canvas.parent('canvas-container');
+                resetSimulation();
+            };
+
+            p.draw = function() {
+                p.background(255);
+                drawField(); // 绘制磁场
+                drawConductor(); // 绘制导体
+
+                if (isRunning && !isPaused) {
+                    updateMotion(); // 更新导体运动
+                    updatePhysics(); // 更新电磁数据
+                }
+            };
+
+            // 绘制磁场
+            function drawField() {
+                p.stroke(0, 100, 255);
+                p.strokeWeight(1);
+                p.noFill();
+
+                // 根据磁场方向绘制磁感线
+                if (fieldDirection === 'left' || fieldDirection === 'right') {
+                    for (let y = 50; y < p.height - 50; y += 30) {
+                        p.beginShape();
+                        p.vertex(50, y);
+                        p.vertex(p.width - 50, y);
+                        p.endShape();
+                        // 箭头指示方向
+                        drawArrow(p.width - 50, y, fieldDirection === 'right' ? 1 : -1, 0);
+                    }
+                } else if (fieldDirection === 'up' || fieldDirection === 'down') {
+                    for (let x = 50; x < p.width - 50; x += 30) {
+                        p.beginShape();
+                        p.vertex(x, 50);
+                        p.vertex(x, p.height - 50);
+                        p.endShape();
+                        // 箭头指示方向
+                        drawArrow(x, 50, 0, fieldDirection === 'up' ? 1 : -1);
+                    }
+                }
+            }
+
+            // 绘制箭头（辅助显示方向）
+            function drawArrow(x, y, dx, dy) {
+                p.push();
+                p.translate(x, y);
+                p.rotate(p.atan2(dy, dx));
+                p.line(0, 0, 15, 0);
+                p.line(15, 0, 10, 5);
+                p.line(15, 0, 10, -5);
+                p.pop();
+            }
+
+            // 绘制导体
+            function drawConductor() {
+                p.stroke(0);
+                p.strokeWeight(3);
+                p.line(conductorX, conductorY, conductorX + conductorLength, conductorY);
+                // 导体端点标记
+                p.fill(255, 0, 0);
+                p.ellipse(conductorX, conductorY, 8, 8);
+                p.ellipse(conductorX + conductorLength, conductorY, 8, 8);
+            }
+
+            // 更新导体运动
+            function updateMotion() {
+                if (motionDirection === 'horizontal') {
+                    conductorX += v * dt;
+                    if (conductorX > p.width - 50) conductorX = 100;
+                } else if (motionDirection === 'vertical') {
+                    conductorY += v * dt;
+                    if (conductorY > p.height - 50) conductorY = 200;
+                } else if (motionDirection === 'diagonal') {
+                    conductorX += v * dt * Math.cos(p.PI / 4);
+                    conductorY += v * dt * Math.sin(p.PI / 4);
+                    if (conductorX > p.width - 50 || conductorY > p.height - 50) {
+                        conductorX = 100;
+                        conductorY = 200;
+                    }
+                }
+            }
+
+            // 更新电磁数据
+            function updatePhysics() {
+                // 计算速度与磁场方向的夹角θ
+                let theta = 0;
+                if ((fieldDirection === 'left' || fieldDirection === 'right') && motionDirection === 'vertical') {
+                    theta = p.PI / 2;
+                } else if ((fieldDirection === 'up' || fieldDirection === 'down') && motionDirection === 'horizontal') {
+                    theta = p.PI / 2;
+                } else if (motionDirection === 'diagonal') {
+                    theta = p.PI / 4;
+                }
+
+                // 感应电动势 E = BLv sinθ
+                const emf = B * conductorLength * v * Math.sin(theta);
+                document.getElementById('emfData').textContent = emf.toFixed(2);
+
+                // 感应电流 I = E / R
+                const current = emf / resistance;
+                document.getElementById('currentData').textContent = current.toFixed(2);
+
+                // 判断电流方向（右手定则）
+                let direction = '无';
+                if (current > 0) {
+                    if (fieldDirection === 'right' && motionDirection === 'vertical' && theta === p.PI / 2) {
+                        direction = '垂直纸面向里';
+                    } else if (fieldDirection === 'down' && motionDirection === 'horizontal' && theta === p.PI / 2) {
+                        direction = '水平向左';
+                    } else if (motionDirection === 'diagonal') {
+                        direction = '斜向';
+                    }
+                } else if (current < 0) {
+                    if (fieldDirection === 'right' && motionDirection === 'vertical' && theta === p.PI / 2) {
+                        direction = '垂直纸面向外';
+                    } else if (fieldDirection === 'down' && motionDirection === 'horizontal' && theta === p.PI / 2) {
+                        direction = '水平向右';
+                    } else if (motionDirection === 'diagonal') {
+                        direction = '斜向';
+                    }
+                }
+                document.getElementById('directionData').textContent = direction;
+            }
+
+            // 重置模拟
+            window.resetSimulation = function() {
+                B = parseFloat(document.getElementById('magneticField').value);
+                v = parseFloat(document.getElementById('conductorSpeed').value);
+                fieldDirection = document.getElementById('fieldDirection').value;
+                motionDirection = document.getElementById('motionDirection').value;
+
+                t = 0;
+                conductorX = 100;
+                conductorY = 200;
+                isRunning = false;
+                isPaused = false;
+
+                // 重置数据显示
+                document.getElementById('emfData').textContent = "0.00";
+                document.getElementById('currentData').textContent = "0.00";
+                document.getElementById('directionData').textContent = "无";
+            }
+
+            // 绑定控制按钮事件
+            document.getElementById('startBtn').addEventListener('click', () => {
+                if (!isRunning) resetSimulation();
+                isRunning = true;
+                isPaused = false;
+            });
+
+            document.getElementById('pauseBtn').addEventListener('click', () => {
+                isPaused = !isPaused;
+            });
+
+            document.getElementById('resetBtn').addEventListener('click', resetSimulation);
+
+            // 绑定参数调节事件
+            document.getElementById('magneticField').addEventListener('input', (e) => {
+                document.getElementById('fieldValue').textContent = e.target.value;
+                if (!isRunning) resetSimulation();
+            });
+
+            document.getElementById('conductorSpeed').addEventListener('input', (e) => {
+                document.getElementById('speedValue').textContent = e.target.value;
+                if (!isRunning) resetSimulation();
+            });
+
+            document.getElementById('fieldDirection').addEventListener('change', (e) => {
+                if (!isRunning) resetSimulation();
+            });
+
+            document.getElementById('motionDirection').addEventListener('change', (e) => {
+                if (!isRunning) resetSimulation();
+            });
+        };
+
+        // 初始化p5.js实例
+        new p5(sketch);
+    </script>
+</body>
+</html>
